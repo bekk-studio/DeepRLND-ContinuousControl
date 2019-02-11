@@ -15,7 +15,7 @@ from collections import deque
 BUFFER_SIZE = int(1e6)  # replay buffer size
 BATCH_SIZE = 64         # minibatch size
 GAMMA = 0.99            # discount factor
-TAU = 1e-2              # for soft update of target parameters
+TAU = 1e-3              # for soft update of target parameters
 TAU_STEP = 4000         # for hard update of target parameters
 ALR = 1e-4              # actor learning rate
 CLR = 1e-3              # critic learning rate
@@ -67,7 +67,8 @@ class DDPG():
         if self.parameter_noise:
             self.std_noise = LinearSchedule(0.1, 0.001, 200000)
         else:
-            self.random_process = OrnsteinUhlenbeckProcess(size=(self.num_agents, action_size), std=LinearSchedule(0.2, 0.01, 50000))
+            #self.random_process = OrnsteinUhlenbeckProcess(size=(self.num_agents, action_size), std=LinearSchedule(0.2, 0.01, 50000))
+            self.random_process = OrnsteinUhlenbeckProcess(size=(self.num_agents, action_size), std=LinearSchedule(0.2))
         
         # DDPG-Network
         #self.DDGPnet = DeterministicActorCriticNetwork(state_size, action_size, seed, fc1_units=fc1_units, fc2_units=fc2_units, alr=ALR, clr=CLR).to(device).train()
@@ -85,8 +86,6 @@ class DDPG():
         self.t_step = 0
         self.hard_update(self.DDPGActor, self.DDPGActor_target, TAU_STEP)
         self.hard_update(self.DDPGCritic, self.DDPGCritic_target, TAU_STEP)
-
-
 
         self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed)
         
@@ -135,7 +134,7 @@ class DDPG():
             self.states = env_info.vector_observations              # get the current states
             if self.state_normalization:                    # Normalize the observed states
                 self.states = self.states_norm(self.states)
-            self.online_rewards = np.zeros(self.num_agents)
+            #self.online_rewards = np.zeros(self.num_agents)
             # Initialize time step (for updating every steps)
             self.t_step = 0
         
@@ -158,7 +157,7 @@ class DDPG():
         if self.state_normalization:                    # Normalize the observed states
             next_states = self.states_norm(next_states)
         rewards = env_info.rewards                   # get the reward
-        self.online_rewards += rewards
+        # self.online_rewards += rewards
         # no reward normalisation
         dones = env_info.local_done
         
@@ -199,15 +198,38 @@ class DDPG():
                 actions2 = self.DDPGActor(states)
                 policy_loss = -self.DDPGCritic((states.detach(), actions2)).mean()
 
-                
                 policy_loss.backward()
                 self.Actor_optimizer.step()
 
                 self.soft_update(self.DDPGActor, self.DDPGActor_target, TAU)
                 self.soft_update(self.DDPGCritic, self.DDPGCritic_target, TAU)
             
-        return episode_dones, self.online_rewards.mean()
+        return episode_dones     #, self.online_rewards.mean()
      
+    def evaluate(self):
+        
+        env_info = self.env.reset(train_mode=True)[self.brain_name]  # reset the environment
+        states = env_info.vector_observations
+        if self.state_normalization:                    # Normalize the observed states
+            states = np.array([self.Normalizer.normalize(s) for s in states])
+            
+        online_rewards = np.array(env_info.rewards)        
+        episode_dones = False
+        while not episode_dones:
+            states = torch.tensor(states, dtype=torch.float32, device=self.device)
+            actions = self.DDPGActor(states).cpu().detach().numpy()
+            env_info = self.env.step(actions)[self.brain_name]        # send the action to the environment
+            rewards = env_info.rewards                   # get the reward
+            online_rewards += rewards
+            states = env_info.vector_observations     # get the next state
+            if self.state_normalization:                    # Normalize the observed states
+                states = np.array([self.Normalizer.normalize(s) for s in states])
+            dones = env_info.local_done
+            if True in dones:
+                episode_dones = True
+                
+        return online_rewards.mean()
+    
     def learn(self, n_episodes=200, max_t=2000, save=False, target=40.):
         """
         Params
@@ -228,8 +250,10 @@ class DDPG():
             self.states = None
             episode_dones = False
             while not episode_dones:
-                episode_dones, score = self.step(max_t)
+                episode_dones = self.step(max_t)
 
+            score = self.evaluate()
+            
             scores_window.append(score)       # save most recent score
             scores.append(score)              # save most recent score
             print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores_window)), end="")
@@ -371,4 +395,21 @@ class RunningNormalizer:
             return x
         else:
             return (x - self.mean()) / np.maximum(self.standard_deviation(), [0.1])
+        
+class AdaptiveParamNoiseSpec:
+    def __init__(self, initial_stddev=0.1, desired_action_stddev=0.1, adoption_coefficient=1.01):
+        self.initial_stddev = initial_stddev
+        self.desired_action_stddev = desired_action_stddev
+        self.adoption_coefficient = adoption_coefficient
+
+        self.current_stddev = initial_stddev
+
+    def adapt(self, distance):
+        if distance > self.desired_action_stddev:
+            # Decrease stddev.
+            self.current_stddev /= self.adoption_coefficient
+        else:
+            # Increase stddev.
+            self.current_stddev *= self.adoption_coefficient
+
 

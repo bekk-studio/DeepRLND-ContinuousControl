@@ -89,11 +89,13 @@ Then, place the file in the `p2_continuous-control/` folder in the DRLND GitHub 
 ### Code Source
 
 The code for **Reacher environment** is available in:
+* Continuous_Control.ipynb
 * model.py
 * DDPGAgent.py
 * PPOAgent.py
 
 The code for **Crawler environment** is available in:
+* Crawler.ipynb
 * model.py
 * DDPGAgent_Crawler.py
 * PPOAgent_Crawler.py

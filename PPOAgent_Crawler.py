@@ -53,6 +53,7 @@ class PPOAgent():
         
         # A2C-Network
         self.PPOnet = GaussianActorCriticNetwork(state_size, action_size, seed, fc_units_actor=fc_units_actor, fc_units_critic=fc_units_critic).to(device).train()
+        self.PPOnet.fc_action.weight.data.uniform_(-3e-3, 3e-3)
         self.optimizer = optim.Adam(self.PPOnet.parameters(), lr=LR, weight_decay=1e-4)
         
         # State Normalizer
